@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Photo Maker</title>
+<meta name="description" content="Turn any video into an iOS Live Photo (JPG + MOV pair), entirely in your browser.">
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1b1e23; --muted: #5d6570;
+    --line: #e2e5ea; --accent: #0a7cff; --accent-text: #ffffff;
+    --ok: #198a4a; --err: #c93b3b; --track: #dfe3e8;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101216; --card: #1a1d23; --text: #e8ebf0; --muted: #98a1ad;
+      --line: #2a2f37; --accent: #3d97ff; --accent-text: #ffffff;
+      --ok: #4cc47f; --err: #ff6b6b; --track: #2c323b;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.9rem; margin: 0 0 4px; letter-spacing: -0.02em; }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 20px; margin-bottom: 16px;
+  }
+  .drop {
+    display: block; border: 2px dashed var(--line); border-radius: 12px;
+    padding: 36px 16px; text-align: center; cursor: pointer; color: var(--muted);
+    transition: border-color .15s, background .15s;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--text); }
+  .drop strong { color: var(--accent); }
+  .drop input { display: none; }
+  video, .result img {
+    width: 100%; max-height: 420px; background: #000; border-radius: 10px; display: block;
+    object-fit: contain;
+  }
+  .row { display: grid; grid-template-columns: 130px 1fr 64px; gap: 12px; align-items: center; margin-top: 14px; }
+  .row label { font-weight: 600; font-size: .92rem; }
+  .row output { font-variant-numeric: tabular-nums; color: var(--muted); text-align: right; font-size: .92rem; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 16px; }
+  .check { display: flex; gap: 8px; align-items: center; font-size: .92rem; }
+  button, .btn {
+    font: inherit; font-weight: 600; border: 1px solid var(--line); background: var(--card);
+    color: var(--text); padding: 9px 16px; border-radius: 10px; cursor: pointer;
+    text-decoration: none; display: inline-block;
+  }
+  button:hover, .btn:hover { border-color: var(--accent); }
+  button.primary, .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .big { width: 100%; padding: 13px; font-size: 1.02rem; margin-top: 18px; }
+  progress { width: 100%; height: 8px; margin-top: 14px; accent-color: var(--accent); }
+  .status { font-size: .92rem; color: var(--muted); margin-top: 8px; min-height: 1.4em; }
+  .status.err { color: var(--err); }
+  .status.ok { color: var(--ok); }
+  .result { display: grid; gap: 14px; }
+  .downloads { display: flex; flex-wrap: wrap; gap: 10px; }
+  .meta { font-size: .85rem; color: var(--muted); word-break: break-all; }
+  ol { padding-left: 20px; margin: 0; }
+  ol li { margin-bottom: 6px; }
+  .warn {
+    border-color: var(--err); color: var(--err); display: none;
+  }
+  .hidden { display: none !important; }
+  footer { color: var(--muted); font-size: .85rem; text-align: center; margin-top: 24px; }
+  footer a { color: inherit; }
+  @media (max-width: 520px) {
+    .row { grid-template-columns: 1fr 56px; }
+    .row label { grid-column: 1 / -1; margin-bottom: -8px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Live Photo Maker</h1>
+  <p class="sub">Turn any video into an iOS Live Photo. Everything runs in your browser, so your video is never uploaded.</p>
+
+  <div class="card warn" id="unsupported">
+    Your browser can't encode video (WebCodecs). Please use a recent Chrome, Edge or Safari.
+  </div>
+
+  <section class="card">
+    <h2>1. Choose a video</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="video/*">
+      <div><strong>Click to choose</strong> or drop a video here</div>
+      <div style="font-size:.85rem;margin-top:4px">MP4, MOV, WebM, anything your browser can play</div>
+    </label>
+  </section>
+
+  <section class="card hidden" id="editor">
+    <h2>2. Pick the moment</h2>
+    <video id="preview" muted playsinline preload="auto"></video>
+    <div class="row">
+      <label for="start">Start</label>
+      <input type="range" id="start" min="0" max="0" step="0.05" value="0">
+      <output id="startOut">0.00s</output>
+    </div>
+    <div class="row">
+      <label for="length">Length</label>
+      <input type="range" id="length" min="0.5" max="5" step="0.1" value="3">
+      <output id="lengthOut">3.0s</output>
+    </div>
+    <div class="row">
+      <label for="key">Cover photo at</label>
+      <input type="range" id="key" min="0" max="3" step="0.05" value="1.5">
+      <output id="keyOut">1.50s</output>
+    </div>
+    <div class="controls">
+      <button id="play" type="button">▶ Play clip</button>
+      <label class="check"><input type="checkbox" id="sound" checked> Include sound</label>
+    </div>
+    <button class="primary big" id="convert" type="button">Make Live Photo</button>
+    <progress id="progress" value="0" max="1" class="hidden"></progress>
+    <div class="status" id="status"></div>
+  </section>
+
+  <section class="card hidden" id="resultCard">
+    <h2>3. Download</h2>
+    <div class="result">
+      <img id="still" alt="Live Photo cover image">
+      <div class="downloads">
+        <a class="btn primary" id="dlBoth" href="#">Download both</a>
+        <a class="btn" id="dlJpg" download>JPG</a>
+        <a class="btn" id="dlMov" download>MOV</a>
+      </div>
+      <div class="meta" id="info"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Getting it onto your iPhone</h2>
+    <ol>
+      <li>Keep the <b>JPG</b> and <b>MOV</b> together. They share a hidden ID that makes them one Live Photo.</li>
+      <li><b>From a PC:</b> open <a href="https://www.icloud.com/photos" target="_blank" rel="noopener">icloud.com/photos</a>, click Upload, and select <b>both files at once</b>. They sync to your iPhone as a single Live Photo.</li>
+      <li><b>From a Mac:</b> drag both files into the Photos app, or AirDrop both to your iPhone.</li>
+      <li>Saving the files on the iPhone through the Files app keeps them as a separate photo and video.</li>
+    </ol>
+  </section>
+
+  <footer>Made with WebCodecs. <a href="https://github.com/bonnieferdinand/live-photo-maker">Source on GitHub</a></footer>
+</main>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- bytes ---
+const enc = new TextEncoder();
+const bytes = (p) => typeof p === "string" ? enc.encode(p) : p;
+function cat(parts) {
+  parts = parts.map(bytes);
+  let n = 0; for (const p of parts) n += p.length;
+  const out = new Uint8Array(n); let i = 0;
+  for (const p of parts) { out.set(p, i); i += p.length; }
+  return out;
+}
+function u32(...v) { const b = new Uint8Array(4 * v.length), d = new DataView(b.buffer); v.forEach((x, i) => d.setUint32(i * 4, x >>> 0)); return b; }
+function i32(...v) { const b = new Uint8Array(4 * v.length), d = new DataView(b.buffer); v.forEach((x, i) => d.setInt32(i * 4, x)); return b; }
+function u16(...v) { const b = new Uint8Array(2 * v.length), d = new DataView(b.buffer); v.forEach((x, i) => d.setUint16(i * 2, x & 0xffff)); return b; }
+const u8 = (...v) => new Uint8Array(v);
+const box = (type, ...parts) => { const body = cat(parts); return cat([u32(body.length + 8), bytes(type), body]); };
+const full = (type, version, flags, ...parts) => box(type, u32((version << 24) | flags), ...parts);
+const toU8 = (d) => d instanceof ArrayBuffer ? new Uint8Array(d.slice(0)) : new Uint8Array(d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength));
+
+// ----------------------------------------------------------- JPEG EXIF ---
+// Apple MakerNote tag 0x0011 holds the Live Photo content identifier.
+function exifApp1(cid) {
+  const cidb = cat([cid, u8(0)]);
+  const mn = cat(["Apple iOS", u8(0, 0, 1), "MM",              // 14-byte header; offsets relative to it
+    u16(2),
+    u16(0x0001, 9), u32(1), i32(11),                          // MakerNoteVersion
+    u16(0x0011, 2), u32(cidb.length, 14 + 2 + 24 + 4),        // ContentIdentifier
+    u32(0), cidb]);
+  const make = cat(["Apple", u8(0)]);
+  const tiff = cat(["MM", u16(42), u32(8),
+    u16(2), u16(0x010f, 2), u32(make.length, 38), u16(0x8769, 4), u32(1, 44), u32(0), make,
+    u16(1), u16(0x927c, 7), u32(mn.length, 62), u32(0), mn]);
+  const payload = cat(["Exif", u8(0, 0), tiff]);
+  return cat([u8(0xff, 0xe1), u16(payload.length + 2), payload]);
+}
+function tagJpeg(jpg, cid) {
+  let pos = 2;
+  if (jpg[2] === 0xff && jpg[3] === 0xe0) pos += 2 + ((jpg[4] << 8) | jpg[5]);   // keep JFIF APP0 first
+  return cat([jpg.subarray(0, pos), exifApp1(cid), jpg.subarray(pos)]);
+}
+
+// ------------------------------------------------------------ MOV muxer ---
+const MATRIX = u32(0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000);
+const TS = 600, FPS = 30, FD = TS / FPS;
+
+const hdlr = (comp, sub) => full("hdlr", 0, 0, comp || u32(0), sub, u32(0, 0, 0), u8(0));
+const tkhd = (id, dur, w, h, vol) => full("tkhd", 0, 3, u32(0, 0, id, 0, dur), u32(0, 0),
+  u16(0, 0, vol, 0), MATRIX, u32(w << 16, h << 16));
+const dinf = () => box("dinf", full("dref", 0, 0, u32(1), full("url ", 0, 1)));
+function mdia(ts, dur, type, mhd, stbl) {
+  return box("mdia", full("mdhd", 0, 0, u32(0, 0, ts, dur), u16(0x55c4, 0)), hdlr("mhlr", type),
+    box("minf", mhd, hdlr("dhlr", "url "), dinf(), stbl));
+}
+function stbl(entry, sizes, delta, offset, sync) {
+  return box("stbl",
+    full("stsd", 0, 0, u32(1), entry),
+    full("stts", 0, 0, u32(1, sizes.length, delta)),
+    sync ? full("stss", 0, 0, u32(sync.length, ...sync)) : new Uint8Array(0),
+    full("stsc", 0, 0, u32(1, 1, sizes.length, 1)),
+    full("stsz", 0, 0, u32(0, sizes.length, ...sizes)),
+    full("stco", 0, 0, u32(1, offset)));
+}
+const avc1 = (w, h, avcC) => box("avc1", new Uint8Array(6), u16(1), u16(0, 0), u32(0, 0, 0), u16(w, h),
+  u32(0x480000, 0x480000), u32(0), u16(1), new Uint8Array(32), u16(0x18, 0xffff), box("avcC", avcC));
+const desc = (tag, body) => cat([u8(tag, body.length), body]);
+const mp4a = (a) => box("mp4a", new Uint8Array(6), u16(1), u16(0, 0), u32(0), u16(a.ch, 16), u16(0, 0), u32(a.sr << 16),
+  full("esds", 0, 0, desc(3, cat([u16(1), u8(0),
+    desc(4, cat([u8(0x40, 0x15, 0, 0, 0), u32(128000, 128000), desc(5, a.asc)])),
+    desc(6, u8(2))]))));
+// timed-metadata entry declaring key 1 = com.apple.quicktime.still-image-time (int8)
+const mebx = () => box("mebx", new Uint8Array(6), u16(1),
+  box("keys", box(u32(1), box("keyd", "mdta", "com.apple.quicktime.still-image-time"), box("dtyp", u32(0, 65)))));
+
+function buildMov({ w, h, video, avcC, audio, keyFrame, cid }) {
+  const vDur = video.length * FD;
+  const ftyp = box("ftyp", "qt  ", u32(0x20050300), "qt  ");
+  const vBytes = cat(video.map((c) => c.data));
+  const aBytes = audio ? cat(audio.chunks) : new Uint8Array(0);
+  const still = cat([u32(9, 1), u8(0xff)]);                  // still-image-time = -1
+  const vOff = ftyp.length + 8, aOff = vOff + vBytes.length, mOff = aOff + aBytes.length;
+  const mdat = box("mdat", vBytes, aBytes, still);
+
+  let id = 1, movieDur = vDur;
+  const traks = [];
+  const sync = []; video.forEach((c, i) => c.key && sync.push(i + 1));
+  traks.push(box("trak", tkhd(id++, vDur, w, h, 0),
+    mdia(TS, vDur, "vide", full("vmhd", 0, 1, u16(0, 0, 0, 0)), stbl(avc1(w, h, avcC), video.map((c) => c.data.length), FD, vOff, sync))));
+  if (audio) {
+    const aDur = audio.chunks.length * 1024, aMovie = Math.round(aDur * TS / audio.sr);
+    movieDur = Math.max(movieDur, aMovie);
+    traks.push(box("trak", tkhd(id++, aMovie, 0, 0, 0x100),
+      mdia(audio.sr, aDur, "soun", full("smhd", 0, 0, u16(0, 0)), stbl(mp4a(audio), audio.chunks.map((c) => c.length), 1024, aOff, null))));
+  }
+  const at = Math.min(keyFrame * FD, vDur - FD), sDur = vDur - at;
+  const elst = at > 0 ? cat([u32(2), u32(at), i32(-1), u32(0x10000)]) : u32(1);
+  traks.push(box("trak", tkhd(id++, vDur, 0, 0, 0),
+    box("edts", full("elst", 0, 0, elst, u32(sDur), i32(0), u32(0x10000))),
+    mdia(TS, sDur, "meta", full("nmhd", 0, 0), stbl(mebx(), [still.length], sDur, mOff, null))));
+
+  const mvhd = full("mvhd", 0, 0, u32(0, 0, TS, movieDur, 0x10000), u16(0x100), new Uint8Array(10), MATRIX,
+    u32(0, 0, 0, 0, 0, 0, id));
+  const meta = box("meta", hdlr(null, "mdta"),
+    full("keys", 0, 0, u32(1), box("mdta", "com.apple.quicktime.content.identifier")),
+    box("ilst", box(u32(1), box("data", u32(1, 0), cid))));
+  return new Blob([ftyp, mdat, box("moov", mvhd, ...traks, meta)], { type: "video/quicktime" });
+}
+
+// ------------------------------------------------------------ encoding ---
+function seek(v, t) {
+  return new Promise((resolve) => {
+    const done = () => { v.removeEventListener("seeked", done); clearTimeout(timer); resolve(); };
+    const timer = setTimeout(done, 3000);
+    v.addEventListener("seeked", done);
+    v.currentTime = t;
+  });
+}
+
+async function pickVideoConfig(w, h) {
+  for (const codec of ["avc1.640028", "avc1.4d0028", "avc1.42e028", "avc1.640033"]) {
+    const cfg = { codec, width: w, height: h, bitrate: 12_000_000, framerate: FPS, avc: { format: "avc" } };
+    try { if ((await VideoEncoder.isConfigSupported(cfg)).supported) return cfg; } catch {}
+  }
+  throw new Error("This browser can't encode H.264 video.");
+}
+
+async function encodeVideo(src, start, length, onProgress) {
+  const v = document.createElement("video");
+  v.muted = true; v.playsInline = true; v.preload = "auto"; v.src = src;
+  await new Promise((ok, bad) => { v.onloadeddata = ok; v.onerror = () => bad(new Error("Couldn't read this video.")); });
+  const scale = Math.min(1, 1920 / Math.max(v.videoWidth, v.videoHeight));
+  const w = Math.round(v.videoWidth * scale / 2) * 2, h = Math.round(v.videoHeight * scale / 2) * 2;
+  const canvas = new OffscreenCanvas(w, h), ctx = canvas.getContext("2d");
+
+  const chunks = []; let avcC = null, failure = null;
+  const encoder = new VideoEncoder({
+    output: (chunk, md) => {
+      if (md && md.decoderConfig && md.decoderConfig.description) avcC = toU8(md.decoderConfig.description);
+      const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
+      chunks.push({ data, key: chunk.type === "key", ts: chunk.timestamp });
+    },
+    error: (e) => { failure = e; },
+  });
+  encoder.configure(await pickVideoConfig(w, h));
+
+  const n = Math.max(1, Math.round(length * FPS));
+  for (let i = 0; i < n; i++) {
+    if (failure) throw failure;
+    await seek(v, start + i / FPS);
+    ctx.drawImage(v, 0, 0, w, h);
+    const frame = new VideoFrame(canvas, { timestamp: Math.round(i * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+    encoder.encode(frame, { keyFrame: i % FPS === 0 });
+    frame.close();
+    while (encoder.encodeQueueSize > 8) await new Promise((r) => setTimeout(r, 5));
+    onProgress((i + 1) / n);
+  }
+  await encoder.flush(); encoder.close();
+  if (failure) throw failure;
+  if (!avcC) throw new Error("Encoder did not provide H.264 configuration.");
+  chunks.sort((a, b) => a.ts - b.ts);
+  v.removeAttribute("src"); v.load();
+  return { w, h, video: chunks, avcC };
+}
+
+function aacConfig(sr, ch) {
+  const idx = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000].indexOf(sr);
+  return u16((2 << 11) | (idx << 7) | (ch << 3));
+}
+
+async function encodeAudio(file, start, length) {
+  if (!("AudioEncoder" in window)) return null;
+  const sr = 48000;
+  let buf;
+  try { buf = await new OfflineAudioContext(2, 1, sr).decodeAudioData(await file.arrayBuffer()); }
+  catch { return null; }                                            // no audio track
+  const ch = Math.min(2, buf.numberOfChannels);
+  const cfg = { codec: "mp4a.40.2", sampleRate: sr, numberOfChannels: ch, bitrate: 128000 };
+  try { if (!(await AudioEncoder.isConfigSupported(cfg)).supported) return null; } catch { return null; }
+  const s0 = Math.floor(start * sr), total = Math.min(Math.floor(length * sr), buf.length - s0);
+  if (total <= 0) return null;
+
+  const chunks = []; let asc = null, failure = null;
+  const encoder = new AudioEncoder({
+    output: (chunk, md) => {
+      if (md && md.decoderConfig && md.decoderConfig.description) asc = toU8(md.decoderConfig.description);
+      const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data); chunks.push(data);
+    },
+    error: (e) => { failure = e; },
+  });
+  encoder.configure(cfg);
+  const block = 4800;
+  for (let off = 0; off < total; off += block) {
+    const n = Math.min(block, total - off), data = new Float32Array(n * ch);
+    for (let c = 0; c < ch; c++) data.set(buf.getChannelData(c).subarray(s0 + off, s0 + off + n), c * n);
+    const ad = new AudioData({ format: "f32-planar", sampleRate: sr, numberOfFrames: n, numberOfChannels: ch, timestamp: Math.round(off / sr * 1e6), data });
+    encoder.encode(ad); ad.close();
+  }
+  await encoder.flush(); encoder.close();
+  if (failure || !chunks.length) return null;
+  return { chunks, asc: asc || aacConfig(sr, ch), sr, ch };
+}
+
+async function makeStill(src, t, w, h) {
+  const v = document.createElement("video");
+  v.muted = true; v.preload = "auto"; v.src = src;
+  await new Promise((ok) => { v.onloadeddata = ok; });
+  await seek(v, t);
+  const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+  canvas.getContext("2d").drawImage(v, 0, 0, w, h);
+  const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.92));
+  v.removeAttribute("src"); v.load();
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() :
+  "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16))).toUpperCase();
+
+async function makeLivePhoto(file, src, { start, length, key, sound }, onProgress) {
+  const cid = uuid();
+  const vid = await encodeVideo(src, start, length, (p) => onProgress(p * 0.85, "Encoding video…"));
+  onProgress(0.88, sound ? "Encoding sound…" : "Finishing…");
+  const audio = sound ? await encodeAudio(file, start, length) : null;
+  const keyFrame = Math.min(vid.video.length - 1, Math.round(key * FPS));
+  onProgress(0.95, "Creating cover photo…");
+  const jpg = tagJpeg(await makeStill(src, start + keyFrame / FPS, vid.w, vid.h), cid);
+  const mov = buildMov({ ...vid, audio, keyFrame, cid });
+  return { cid, jpg: new Blob([jpg], { type: "image/jpeg" }), mov, w: vid.w, h: vid.h, hasAudio: !!audio };
+}
+window.LivePhoto = { makeLivePhoto };   // exposed for scripting/testing
+
+// ------------------------------------------------------------------ UI ---
+const $ = (id) => document.getElementById(id);
+const state = { file: null, url: null, duration: 0, result: null };
+
+if (!("VideoEncoder" in window)) { $("unsupported").style.display = "block"; $("convert").disabled = true; }
+
+function setStatus(msg, kind = "") { $("status").textContent = msg; $("status").className = "status " + kind; }
+
+function syncSliders() {
+  const s = $("start"), l = $("length"), k = $("key");
+  const maxLen = Math.max(0.5, Math.min(5, state.duration - +s.value));
+  l.max = maxLen.toFixed(2);
+  if (+l.value > maxLen) l.value = maxLen;
+  k.max = (+l.value).toFixed(2);
+  if (+k.value > +l.value) k.value = +l.value / 2;
+  $("startOut").textContent = (+s.value).toFixed(2) + "s";
+  $("lengthOut").textContent = (+l.value).toFixed(1) + "s";
+  $("keyOut").textContent = (+k.value).toFixed(2) + "s";
+}
+
+async function loadFile(file) {
+  if (!file) return;
+  if (state.url) URL.revokeObjectURL(state.url);
+  state.file = file; state.url = URL.createObjectURL(file); state.result = null;
+  $("resultCard").classList.add("hidden");
+  const v = $("preview");
+  v.src = state.url;
+  await new Promise((ok, bad) => { v.onloadedmetadata = ok; v.onerror = bad; }).catch(() => null);
+  if (!v.duration || !isFinite(v.duration)) { setStatus("Couldn't play this video in your browser.", "err"); return; }
+  state.duration = v.duration;
+  $("start").max = Math.max(0, v.duration - 0.5).toFixed(2);
+  $("start").value = 0;
+  $("length").value = Math.min(3, v.duration);
+  $("key").value = Math.min(3, v.duration) / 2;
+  syncSliders();
+  $("editor").classList.remove("hidden");
+  setStatus("");
+  showKey();
+}
+window.LivePhoto.loadFile = loadFile;
+
+function showKey() { const v = $("preview"); v.pause(); v.currentTime = +$("start").value + +$("key").value; }
+
+$("file").addEventListener("change", (e) => loadFile(e.target.files[0]));
+const drop = $("drop");
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => loadFile(e.dataTransfer.files[0]));
+for (const id of ["start", "length", "key"]) $(id).addEventListener("input", () => { syncSliders(); showKey(); });
+
+$("play").addEventListener("click", () => {
+  const v = $("preview"), s = +$("start").value, end = s + +$("length").value;
+  v.currentTime = s; v.muted = !$("sound").checked; v.play();
+  const stop = () => { if (v.currentTime >= end) { v.pause(); v.removeEventListener("timeupdate", stop); showKey(); } };
+  v.addEventListener("timeupdate", stop);
+});
+
+$("convert").addEventListener("click", async () => {
+  const btn = $("convert"), bar = $("progress");
+  btn.disabled = true; bar.classList.remove("hidden"); bar.value = 0;
+  $("preview").pause();
+  try {
+    const r = await makeLivePhoto(state.file, state.url, {
+      start: +$("start").value, length: +$("length").value, key: +$("key").value, sound: $("sound").checked,
+    }, (p, msg) => { bar.value = p; setStatus(msg); });
+    showResult(r);
+    setStatus("Done! Download both files below.", "ok");
+  } catch (e) {
+    console.error(e);
+    setStatus("Something went wrong: " + (e.message || e), "err");
+  } finally {
+    btn.disabled = false; bar.classList.add("hidden");
+  }
+});
+
+function showResult(r) {
+  if (state.result) { URL.revokeObjectURL(state.result.jpgUrl); URL.revokeObjectURL(state.result.movUrl); }
+  const base = (state.file.name.replace(/\.[^.]+$/, "") || "LivePhoto").replace(/[^\w.-]+/g, "_");
+  r.jpgUrl = URL.createObjectURL(r.jpg); r.movUrl = URL.createObjectURL(r.mov);
+  state.result = r;
+  $("still").src = r.jpgUrl;
+  Object.assign($("dlJpg"), { href: r.jpgUrl, download: base + ".JPG" });
+  Object.assign($("dlMov"), { href: r.movUrl, download: base + ".MOV" });
+  const mb = (b) => (b.size / 1048576).toFixed(1) + " MB";
+  $("info").textContent = `${r.w}×${r.h} · JPG ${mb(r.jpg)} · MOV ${mb(r.mov)}${r.hasAudio ? " with sound" : ", no sound"} · ID ${r.cid}`;
+  $("resultCard").classList.remove("hidden");
+  $("resultCard").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("dlBoth").addEventListener("click", (e) => {
+  e.preventDefault();
+  $("dlJpg").click();
+  setTimeout(() => $("dlMov").click(), 400);
+});
+</script>
+</body>
+</html>
