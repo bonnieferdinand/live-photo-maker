@@ -17,10 +17,9 @@ The page encodes the clip, writes the MOV container itself, and adds the Exif da
 
 ## Getting it onto your iPhone
 
-Keep both files together and import them **at the same time**:
+Keep both files together and import them **at the same time** into the Photos app on a Mac. Photos pairs them into one Live Photo, and iCloud syncs it to your iPhone.
 
-- **PC:** upload both files at once at [icloud.com/photos](https://www.icloud.com/photos).
-- **Mac:** drag both into Photos, or AirDrop both to your iPhone.
+Uploading at icloud.com, or saving the files on an iPhone through the Files app, keeps them as a separate photo and video. Those routes don't pair Live Photos.
 
 ## Desktop version
 
